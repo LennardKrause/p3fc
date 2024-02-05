@@ -23,6 +23,13 @@ The data can then be integrated using Brukers SAINT+ Integration Engine V8.35A o
    - This program is distributed in the hope that it will be useful but WITHOUT ANY WARRANTY
    - Bruker is not associated with this software and will not support this
 
+## Installation
+Install directly from the wheel (check releases)
+```
+python3 -m pip install p3fc-1.0.0-py3-none-any.whl
+```
+it is installed as a script, run ```p3fc``` from a terminal.
+
 ## Requirements
 
 #### [Python](https://www.python.org/) 3.5 or later
