@@ -1,0 +1,33 @@
+[project]
+name = "p3fc"
+dynamic = ["version"]
+authors = [
+  { name="Lennard Krause", email="lkrause@chem.au.dk" },
+]
+
+description = "An easy-to-use GUI to convert PILATUS3 images to the Bruker .sfrm format and to generate X-ray aperture masks for the Bruker SAINT+ integration engine"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = ["numpy >= 1.26",
+                "pyqtgraph >= 0.13",
+                "scipy >= 1.11",
+                "PyQt6 >= 6.6",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License (GPL)",
+    "Operating System :: OS Independent",
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Topic :: Education",
+    "Topic :: Scientific/Engineering",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "p3fc.__version__"}
+
+[project.urls]
+"Homepage" = "https://github.com/LennardKrause/p3fc"
+
+[project.scripts]
+p3fc = "p3fc.run_p3fc:main"
