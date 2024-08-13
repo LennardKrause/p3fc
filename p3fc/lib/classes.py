@@ -12,7 +12,7 @@ from collections import defaultdict
 from PyQt6 import QtCore, QtWidgets, QtGui
 from p3fc.lib.gui import Ui_MainWindow
 from p3fc.lib.utility import read_pilatus_cbf, read_pilatus_tif, read_pilatus_tif_gz, get_run_info, pilatus_pad,\
-                             convert_frame_APS_Bruker, convert_frame_SP8_Bruker,\
+                             convert_frame_APS_Bruker, convert_frame_SP8_Bruker, convert_frame_SP8_Bruker_gz,\
                              convert_frame_DLS_Bruker, write_bruker_frame, bruker_header
 # todo
 # use tth to calculate beamcenter offset on rotation
@@ -1158,7 +1158,7 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
             SP8_tth_corr = 0.0
             if year < 2019:
                 SP8_tth_corr = 0.048
-            conversion = convert_frame_SP8_Bruker
+            conversion = convert_frame_SP8_Bruker_gz
             args = [path_output]
             # change wavelength
             source_w = None

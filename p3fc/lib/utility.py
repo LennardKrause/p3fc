@@ -863,6 +863,167 @@ def convert_frame_SP8_Bruker(fname, path_sfrm, tth_corr=0.0, rows=1043, cols=981
     write_bruker_frame(outName, header, data)
     return True
 
+def convert_frame_SP8_Bruker_gz(fname, path_sfrm, tth_corr=0.0, rows=1043, cols=981, offset=4096, overwrite=True, source_w=None):
+    '''
+     
+    '''
+    import os, re
+    import numpy as np
+    from datetime import datetime as dt
+    
+    # split path, name and extension
+    path_to, frame_name = os.path.split(fname)
+    basezip, ext = os.path.splitext(frame_name)
+    basename, ext = os.path.splitext(basezip)
+    frame_stem, frame_run, frame_num, _ = get_run_info(basename)
+    
+    # output file format: some_name_rr_ffff.sfrm
+    outName = os.path.join(path_to, path_sfrm, '{}_{:>02}_{:>04}.sfrm'.format(frame_stem, frame_run, frame_num))
+
+    # check if file exists and overwrite flag
+    if os.path.exists(outName) and overwrite == False:
+        return False
+    
+    # read in the frame
+    _, data = read_pilatus_tif_gz(fname, rows, cols, offset, np.int32)
+    
+    # get the frame saint ready
+    # - pad with zeros
+    data, offset_rows, offset_cols = pilatus_pad(data)
+    
+    # the frame has to be rotated by 90 degrees
+    data = np.rot90(data, k=1, axes=(1, 0))
+
+    # sloppy simulation of a detector drift
+    #data = np.roll(data, (frame_run//2, frame_run), axis=(0,1))
+    
+    # the dead areas are flagged -1
+    data[data == -1] = 0
+    
+    # bad pixels are flagged -2
+    data[data == -2] = 0
+    
+    # scale the data to avoid underflow tables
+    # should yield zero for Pilatus3 images!
+    baseline_offset = -1 * data.min()
+    data += baseline_offset
+    
+    # info file name
+    infFile = os.path.join(path_to, basename + '.inf')
+    
+    # check if info file exists
+    if not os.path.isfile(infFile):
+        print('ERROR: Info file is missing for: {}'.format(frame_name))
+        return False
+    
+    # extract header information
+    with open(infFile) as rFile:
+        infoFile = rFile.read()
+        #det_dim_x = int(re.search(r'SIZE1\s*=\s*(\d+)\s*;', infoFile).groups()[0])
+        #det_dim_y = int(re.search(r'SIZE2\s*=\s*(\d+)\s*;', infoFile).groups()[0])
+        #det_size_x, det_size_y = [float(i) for i in re.search(r'CCD_DETECTOR_SIZE\s*=\s*(\d+\.\d+)\s*(\d+\.\d+)\s*;', infoFile).groups()]
+        det_beam_x, det_beam_y = [float(i) for i in re.search(r'CCD_SPATIAL_BEAM_POSITION\s*=\s*(-*\d+\.\d+)\s*(-*\d+\.\d+)\s*;', infoFile).groups()]
+        det_maxv = int(re.search(r'SATURATED_VALUE\s*=\s*(\d+)\s*;', infoFile).groups()[0])
+        if source_w is None:
+            source_w = float(re.search(r'SCAN_WAVELENGTH\s*=\s*(\d+\.\d+)\s*;', infoFile).groups()[0])
+        source_a = float(re.search(r'SOURCE_AMPERAGE\s*=\s*(\d+\.\d+)\s*mA\s*;', infoFile).groups()[0])
+        source_v = float(re.search(r'SOURCE_VOLTAGE\s*=\s*(\d+\.\d+)\s*GeV\s*;', infoFile).groups()[0])
+        goni_omg, goni_chi, goni_phi = [float(i) for i in re.search(r'CRYSTAL_GONIO_VALUES\s*=\s*(-*\d+\.\d+)\s*(-*\d+\.\d+)\s*(-*\d+\.\d+)\s*;', infoFile).groups()]
+        goni_tth, goni_dxt = [float(i) for i in re.search(r'SCAN_DET_RELZERO\s*=\s*-*\d+\.\d+\s*(-*\d+\.\d+)\s*(-*\d+\.\d+)\s*;', infoFile).groups()]
+        scan_rax = str(re.search(r'ROTATION_AXIS_NAME\s*=\s*(\w+)\s*;', infoFile).groups()[0])
+        scan_num = float(re.search(r'SCAN_SEQ_INFO\s*=\s*\d+\s*\d+\s*(\d+)\s*;', infoFile).groups()[0])
+        scan_sta, scan_end, scan_inc, scan_exp = [float(i) for i in re.search(r'SCAN_ROTATION\s*=\s*(-*\d+\.\d+)\s*(-*\d+\.\d+)\s*(-*\d+\.\d+)\s*(-*\d+\.\d+)\s*-*\d+\.\d+\s*-*\d+\.\d+\s*-*\d+\.\d+\s*-*\d+\.\d+\s*-*\d+\.\d+\s*-*\d+\.\d+\s*;', infoFile).groups()]
+    
+    # For some reason the distance is missing for some runs.
+    # At SPring-8 the detector distance 'cannot' be changed.
+    # So, we hard-code 130.0 on missing entry here!
+    if goni_dxt == 0.0:
+        goni_dxt = 130.0
+    
+    # initial frame dimensions are needed to calculate
+    # the beamcenter of the reshaped frame and
+    # adjust the beam center to the rotation
+    beam_x = det_beam_y + offset_rows
+    beam_y = cols - det_beam_x + offset_cols
+    
+    # 2-th were misaligned (pre 2019 data)
+    goni_tth = goni_tth + (goni_tth * tth_corr)
+    
+    # SP8 to Bruker conversion:
+    goni_chi = -goni_chi
+    goni_phi = -goni_phi
+
+    # calculate detector pixel per cm
+    # this is normalized to a 512x512 detector format
+    # PILATUS3-1M pixel size is 0.172 mm 
+    pix_per_512 = round((10.0 / 0.172) * (512.0 / cols), 6)
+    
+    # convert SP8 to Bruker angles
+    ax_name_to_num = {'Omega':2, 'Phi':3}
+    axis_start = [goni_tth, goni_omg, goni_phi, goni_chi]
+    axis_start[ax_name_to_num[scan_rax]-1] = scan_sta
+    axis_end = [goni_tth, goni_omg, goni_phi, goni_chi]
+    axis_end[ax_name_to_num[scan_rax]-1] = scan_end
+    
+    # default bruker header
+    header = bruker_header()
+    
+    # fill known header items
+    header['NROWS'][:]   = [data.shape[0], 2]                                   # Number of rows in frame; number of mosaic tiles in Y; dZ/dY value
+    header['NCOLS'][:]   = [data.shape[1], 5]                                   # Number of pixels per row; number of mosaic tiles in X; dZ/dX
+    header['CENTER'][:]  = [beam_x, beam_y, beam_x, beam_y]                     # adjust the beam center for the filling/cutting of the frame
+    header['CCDPARM'][:] = [1.00, 1.00, 1.00, 0.00, det_maxv]                   # readnoise, electronsperadu, electronsperphoton, bruker_bias, bruker_fullscale
+    header['DETPAR'][:]  = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]                       # Detector position corrections (Xc, Yc, Dist, Pitch, Roll, Yaw)
+    header['DETTYPE'][:] = ['PILATUS3-1M', pix_per_512, 0.001, 0, 0.001, 0.001, 1]
+    header['SITE']       = ['SPring-8/BL02B1']                                  # Site name
+    header['MODEL']      = ['Synchrotron']                                      # Diffractometer model
+    header['TARGET']     = ['Bending Magnet']                                   # X-ray target material)
+    header['USER']       = ['USER']                                             # Username
+    header['SOURCEK']    = [source_v]                                           # X-ray source kV
+    header['SOURCEM']    = [source_a]                                           # Source milliamps
+    header['WAVELEN'][:] = [source_w, source_w, source_w]                       # Wavelengths (average, a1, a2)
+    header['FILENAM']    = [basename]
+    header['CUMULAT']    = [scan_exp]                                           # Accumulated exposure time in real hours
+    header['ELAPSDR']    = [scan_exp]                                           # Requested time for this frame in seconds
+    header['ELAPSDA']    = [scan_exp]                                           # Actual time for this frame in seconds
+    header['START'][:]   = scan_sta                                             # Starting scan angle value, decimal deg
+    header['ANGLES'][:]  = axis_start                                           # Diffractometer setting angles, deg. (2Th, omg, phi, chi)
+    header['ENDING'][:]  = axis_end                                             # Setting angles read at end of scan
+    header['TYPE']       = ['Generic {} Scan'.format(scan_rax)]                 # String indicating kind of data in the frame
+    header['DISTANC']    = [float(goni_dxt) / 10.0]                             # Sample-detector distance, cm
+    header['RANGE']      = [abs(scan_inc)]                                      # Magnitude of scan range in decimal degrees
+    header['INCREME']    = [scan_inc]                                           # Signed scan angle increment between frames
+    header['NUMBER']     = [frame_num]                                          # Number of this frame in series (zero-based)
+    header['NFRAMES']    = [int(scan_num)]                                      # Number of frames in the series
+    header['AXIS'][:]    = [ax_name_to_num[scan_rax]]                           # Scan axis (1=2-theta, 2=omega, 3=phi, 4=chi)
+    header['LOWTEMP'][:] = [1, int((-273.15 + 20.0) * 100.0), -6000]            # Low temp flag; experiment temperature*100; detector temp*100
+    header['NEXP'][2]    = baseline_offset
+    header['MAXXY']      = np.array(np.where(data == data.max()), float)[:, 0]
+    header['MAXIMUM']    = [np.max(data)]
+    header['MINIMUM']    = [np.min(data)]
+    header['NCOUNTS'][:] = [data.sum(), 0]
+    header['NOVER64'][:] = [data[data > 64000].shape[0], 0, 0]
+    header['NSTEPS']     = [1]                                                  # steps or oscillations in this frame
+    header['NPIXELB'][:] = [1, 1]                                               # bytes/pixel in main image, bytes/pixel in underflow table
+    header['COMPRES']    = ['NONE']                                             # compression scheme if any
+    header['TRAILER']    = [-1]                                                 # byte pointer to trailer info
+    header['LINEAR'][:]  = [1.00, 0.00]                                         # bruker_linearscale, bruker_linearoffset
+    header['PHD'][:]     = [1.00, 0.10]                                         # Phosphor efficiency, phosphor thickness
+    header['PREAMP']     = [1]                                                  # Preamp gain setting
+    header['CORRECT']    = ['INTERNAL']                                         # Flood correction filename
+    header['DARK']       = ['INTERNAL']                                         # Dark current frame name
+    header['WARPFIL']    = ['LINEAR']                                           # Spatial correction filename
+    ox = data.shape[1]
+    oy = data.shape[0]
+    header['OCTMASK'][:] = [0, 0, 0, ox-1, ox-1, ox+oy-1, oy-1, oy-1]           # Octagon mask parameters (GADDS) #min x, min x+y, min y, max x-y, max x, max x+y, max y, max y-x
+    header['DISPLIM'][:] = [0.0, 100.0]                                         # Recommended display contrast window settings
+    header['FILTER2'][:] = [90.0, 0.0, 0.0, 1.0]                                # Monochromator 2-theta, roll (both deg)
+    header['CREATED']    = [dt.fromtimestamp(os.path.getmtime(fname)).strftime('%Y-%m-%d %H:%M:%S')]# use creation time of raw data!
+    
+    # write the frame
+    write_bruker_frame(outName, header, data)
+    return True
+
 def convert_frame_DLS_Bruker(fname, path_sfrm, rows=1679, cols=1475, offset=0, overwrite=True):
     '''
     
