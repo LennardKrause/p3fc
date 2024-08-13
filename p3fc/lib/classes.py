@@ -462,7 +462,7 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
             self.fStem = fstm                         # Frame name up to the run number
             self.fStar = '{:>0{w}}.'.format(1, w=flen)# Number indicating start of a run
             self.fInfo = (1043, 981, 4096, np.int32)  # Frame info (rows, cols, offset)
-            self.fSite = 'SP8'                        # Facility identifier
+            self.fSite = 'SP8_gz'                     # Facility identifier
             self.fFunc = read_pilatus_tif_gz          # Frame read function (from _Utility)
             self.fRota = True                         # rotate the frame upon conversion?
             self.detector_type = 'PILATUS'            # detector type for SAINT
@@ -1139,6 +1139,21 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
             rows, cols, offset, dtype = self.fInfo
             # check data collection timestamp
             with open(self.currentFrame, 'rb') as ofile:
+                year = int(re.search(rb'(\d{4}):\d{2}:\d{2}\s+\d{2}:\d{2}:\d{2}', ofile.read(64)).group(1).decode())
+            SP8_tth_corr = 0.0
+            if year < 2019:
+                SP8_tth_corr = 0.048
+            conversion = convert_frame_SP8_Bruker
+            args = [path_output]
+            # change wavelength
+            source_w = None
+            if self.action_set_wavelength.isChecked():
+                source_w = self.exp_wavelength
+            kwargs = {'tth_corr':SP8_tth_corr, 'rows':rows, 'cols':cols, 'offset':offset, 'overwrite':overwrite_flag, 'source_w':source_w}
+        elif self.fSite == 'SP8_gz':
+            rows, cols, offset, dtype = self.fInfo
+            # check data collection timestamp
+            with gzip.open(self.currentFrame, 'rb') as ofile:
                 year = int(re.search(rb'(\d{4}):\d{2}:\d{2}\s+\d{2}:\d{2}:\d{2}', ofile.read(64)).group(1).decode())
             SP8_tth_corr = 0.0
             if year < 2019:
