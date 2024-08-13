@@ -3,6 +3,7 @@ import sys
 import logging
 import re
 import glob
+import gzip
 import pickle
 import numpy as np
 import pyqtgraph as pg
@@ -10,7 +11,7 @@ from scipy import ndimage as ndi
 from collections import defaultdict
 from PyQt6 import QtCore, QtWidgets, QtGui
 from p3fc.lib.gui import Ui_MainWindow
-from p3fc.lib.utility import read_pilatus_cbf, read_pilatus_tif, get_run_info, pilatus_pad,\
+from p3fc.lib.utility import read_pilatus_cbf, read_pilatus_tif, , read_pilatus_tif_gz, get_run_info, pilatus_pad,\
                              convert_frame_APS_Bruker, convert_frame_SP8_Bruker,\
                              convert_frame_DLS_Bruker, write_bruker_frame, bruker_header
 # todo
@@ -323,8 +324,9 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         #########################################
         ##  Add new format identifiers here!   ##
         #########################################
-        self.exts = ('*_*.tif', '*_*.cbf')
+        self.exts = ('*_*.tif', '*_*.cbf', '*_*.tif.gz')
         self.availableFormats = [self.format_SP8,
+                                 self.format_SP8_gz,
                                  self.format_APS,
                                  self.format_DLS]
     
@@ -428,6 +430,40 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
             self.fInfo = (1043, 981, 4096, np.int32)  # Frame info (rows, cols, offset)
             self.fSite = 'SP8'                        # Facility identifier
             self.fFunc = read_pilatus_tif             # Frame read function (from _Utility)
+            self.fRota = True                         # rotate the frame upon conversion?
+            self.detector_type = 'PILATUS'            # detector type for SAINT
+            return True
+        except ValueError:
+            return False
+    
+    def format_SP8_gz(self):
+        logging.info(self.__class__.__name__)
+        '''
+        Check the first file if name is compatible with SPring-8 convention
+        e.g. any_name_rrfff.tif, where rr is the 2 digit run numer: 00 - 99
+        fff is the 3 digit frame number: 001 - 999
+        '''
+        try:
+            fhead, fname = os.path.split(self.currentFrame)
+            zname, ext = os.path.splitext(fname)
+            if not ext == '.gz':
+                return False
+            # open file and check S/N: 10-0163
+            with gzip.open(self.currentFrame, 'rb') as oFrame:
+                SN = re.search(rb'S/N\s+(?P<SN>\d+\-\d+)', oFrame.read(128)).group('SN').decode()
+            if not SN == '10-0163':
+                return False
+            bname, ext = os.path.splitext(zname)
+            fstm, rnum, fnum, flen = get_run_info(bname)
+            ########################################
+            ## USE FNUM TO DEFINE START OF RUN!!! ##
+            ########################################
+            self.fRnum = rnum                         # Run number
+            self.fStem = fstm                         # Frame name up to the run number
+            self.fStar = '{:>0{w}}.'.format(1, w=flen)# Number indicating start of a run
+            self.fInfo = (1043, 981, 4096, np.int32)  # Frame info (rows, cols, offset)
+            self.fSite = 'SP8'                        # Facility identifier
+            self.fFunc = read_pilatus_tif_gz          # Frame read function (from _Utility)
             self.fRota = True                         # rotate the frame upon conversion?
             self.detector_type = 'PILATUS'            # detector type for SAINT
             return True
