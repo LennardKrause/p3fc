@@ -181,6 +181,28 @@ def read_pilatus_tif(fname, rows, cols, offset, bytecode):
     data = np.frombuffer(rawData, bytecode).reshape((rows, cols))
     return header, data
 
+def read_pilatus_tif_gz(fname, rows, cols, offset, bytecode):
+    '''
+     
+    '''
+    import gzip
+    import numpy as np
+    # translate the bytecode to the bytes per pixel
+    bpp = len(np.array(0, bytecode).tostring())
+    # determine the image size
+    size = rows * cols * bpp
+    # open the file
+    with gzip.open(fname, 'rb') as f:
+        # read the header
+        h = f.read(offset)    
+        # read the image (bytestream)
+        rawData = f.read(size)
+    header = str(h)
+    # reshape the image into 2d array (rows, cols)
+    # dtype = bytecode
+    data = np.frombuffer(rawData, bytecode).reshape((rows, cols))
+    return header, data
+
 def pilatus_pad(data, fill=-2, pad=8):
     import numpy as np
     # get the frame saint ready 
