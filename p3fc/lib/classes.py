@@ -16,6 +16,7 @@ from p3fc.lib.utility import read_pilatus_cbf, read_pilatus_tif, read_pilatus_ti
                              convert_frame_DLS_Bruker, write_bruker_frame, bruker_header
 # todo
 # use tth to calculate beamcenter offset on rotation
+# clear patches when loading new folder -> or setup a dict structure to keep them in order!
 
 class FillRectROI(pg.RectROI):
     def __init__(self, pos, size, brush=None, **args):
@@ -160,6 +161,7 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.action_rem_circle.triggered.connect(self.patches_circs_rem)
         self.action_flip_image.triggered.connect(self.change_image)
         self.action_set_wavelength.triggered.connect(self.set_wavelength)
+        self.action_set_twotheta.triggered.connect(self.set_twotheta)
         
         # disable the draw-mask tabWidget
         # enable if valid images are loaded
@@ -177,6 +179,12 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         if ok:
             self.exp_wavelength = val
 
+    def set_twotheta(self):
+        val, ok = QtWidgets.QInputDialog.getDouble(self, 'Set Experimental Parameter', '2-Theta offset [%]', value=self.SP8_tth_corr*100, min=-10.0, max=10.0, decimals=1, step=0.1)
+        if ok:
+            self.SP8_tth_corr = round(val / 100, 3)
+            self.change_image()
+
     def set_tooltips(self):
         logging.debug(self.__class__.__name__)
         # add tooltips
@@ -187,6 +195,7 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.cb_overwrite.setToolTip('Overwrite existing files in the output directory?')
         
         self.action_set_wavelength.setToolTip('Check and manually set the wavelength, uncheck to use the .inf information.')
+        self.action_set_twotheta.setToolTip('Check and manually set an 2-Theta offset, uncheck to use the .inf information.')
 
         self.action_add_circle.setToolTip('Add a pair of circles. Use the green circle to unmask regions.')
         self.action_rem_circle.setToolTip('Remove the last Circle pair.')
@@ -199,19 +208,18 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         logging.debug(self.__class__.__name__)
         # use the QFileSystemModel
         self.model = QtGui.QFileSystemModel()
+        self.model.setReadOnly(True)
         self.model.setRootPath('')
-        #self.model.setNameFilters(['*.tif', '*.sfrm'])
-        self.model.setNameFilterDisables(False)
         # currently only shows directories
         # use:  | QtCore.QDir.AllEntries
         # to show files
         self.model.setFilter(QtCore.QDir.Filter.AllDirs | QtCore.QDir.Filter.NoDotAndDotDot)# | QtCore.QDir.Filter.AllEntries)
         
-        # set treeView to use the QFileSystemModel 
+        # set treeView to use the QFileSystemModel
+        self.treeView.setAnimated(False)
+        self.treeView.setUniformRowHeights(True)
         self.treeView.setModel(self.model)
-        self.treeView.setAnimated(True)
-        self.treeView.setIndentation(10)
-        self.treeView.setSortingEnabled(True)
+        self.treeView.sortByColumn(0, QtCore.Qt.SortOrder.AscendingOrder)
         # don't strech last column
         self.treeView.header().setStretchLastSection(True)
         # stretch first
@@ -223,10 +231,19 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         
         # scroll the treeview to start_dir
         # apply start_dir as current dir by calling the 'on_click' function
-        start_dir = os.getcwd()
-        self.treeView.scrollTo(self.model.index(start_dir))
-        self.on_treeView_clicked(self.model.index(start_dir))
+        index = self.model.index(os.getcwd())
+        self.on_treeView_clicked(index)
+        self.treeView.setCurrentIndex(index)
+        self.treeView.setExpanded(index, True)
+        # delay the scrollTo call to allow the treeview
+        # to expand all sections leading to the directory
+        QtCore.QTimer.singleShot(500, self.current_row_changed)
         
+    def current_row_changed(self):
+        index = self.model.index(os.getcwd())
+        self.treeView.scrollTo(index, QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
+        self.treeView.setFocus()
+
     def init_icons(self):
         logging.debug(self.__class__.__name__)
         # icons
@@ -276,7 +293,8 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.exp_beamcenter_y = None # m CCD_SPATIAL_BEAM_POSITION=501.05 528.57;
         self.exp_distance = None     # m SCAN_DET_RELZERO=2.000 0.000   130.00;
         self.exp_wavelength = None   # Ang SCAN_WAVELENGTH=0.2482;
-        self.current_tth = 0.0
+        self.SP8_tth_corr = 0.0      # Correction factor for 2-theta offset [%]
+        self.current_tth = 0.0       # Indicator to change the patches to new positions
         self.reset_patches = True
         self.mask_negative = True
         self.flag_reset_view = False
@@ -483,6 +501,8 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
                 self.exp_wavelength = float(re.search(r'SCAN_WAVELENGTH\s*=\s*(\d+\.\d+)\s*;', infoFile).groups()[0])
                 self.exp_tth, inf_distance = [float(i) for i in re.search(r'SCAN_DET_RELZERO\s*=\s*-*\d+\.\d+\s*(-*\d+\.\d+)\s*(-*\d+\.\d+)\s*;', infoFile).groups()]
                 self.exp_distance = inf_distance * 1e-3
+                # apply SP8 2-theta correction factor
+                self.exp_tth += self.exp_tth * self.SP8_tth_corr
                 if self.exp_tth == self.current_tth:
                     self.reset_patches = False
                 else:
@@ -531,17 +551,17 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
                 self.le_input.setStyleSheet(self.le_style_coupled)
                 self.le_output.setStyleSheet(self.le_style_coupled)
                 self.paths_active = self.le_input
-                self.treeView.scrollTo(self.model.index(self.le_input.text()))
+                self.treeView.scrollTo(self.model.index(self.le_input.text()), QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
             elif obj == self.le_output and not self.cb_link.isChecked():
                 self.le_input.setStyleSheet(self.le_style_coupled)
                 self.le_output.setStyleSheet(self.le_style_single)
                 self.paths_active = self.le_output
-                self.treeView.scrollTo(self.model.index(self.le_output.text()))
+                self.treeView.scrollTo(self.model.index(self.le_output.text()), QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
             elif obj == self.le_input and not self.cb_link.isChecked():
                 self.le_input.setStyleSheet(self.le_style_single)
                 self.le_output.setStyleSheet(self.le_style_coupled)
                 self.paths_active = self.le_input
-                self.treeView.scrollTo(self.model.index(self.le_input.text()))
+                self.treeView.scrollTo(self.model.index(self.le_input.text()), QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
         return super(Main_GUI, self).eventFilter(obj, event)
 
     def popup_window(self, _title, _text, _info):
@@ -617,9 +637,10 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.mask_change_frame_max_int()
         self.add_resolution_label()
         
-        iPath = os.path.abspath(self.le_input.text())
+        #iPath = os.path.abspath(self.le_input.text())
         oPath = os.path.abspath(self.le_output.text())
-        self.path_inf = os.path.join(iPath, '{}_{:>02}_{}inf'.format(self.fStem, int(self.fRnum), self.fStar))
+        #self.path_inf = os.path.join(iPath, '{}_{:>02}_{}inf'.format(self.fStem, int(self.fRnum), self.fStar))
+        self.path_inf = f'{os.path.splitext(os.path.splitext(self.currentFrame)[0])[0]}.inf'
         self.path_mask = os.path.join(oPath, '{}_xa_{:>02}_0001.sfrm'.format(self.fStem, int(self.fRnum)))
         self.path_patches = os.path.join(oPath, '{}_xa_{:>02}_0001.msk'.format(self.fStem, int(self.fRnum)))
         self.read_inf()
@@ -644,6 +665,7 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         if idx == 1:
             self.mask_change_image_abs(self.currentIndex)
             self.menu_mask.setEnabled(True)
+            self.glwidget.setFocus()
         else:
             self.menu_mask.setEnabled(False)
             return
@@ -852,6 +874,7 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
             self.plt.removeItem(p)
             p,_ = self.patches_circs.pop()
             self.plt.removeItem(p)
+            self.patch_size_current -= 2 * self.patch_size_increment
             self.patches_circs_sort()
     
     def patches_circs_sort(self):
@@ -987,7 +1010,7 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         
         self.tb_convert.setText('Convert Images')
         self.tb_convert.setEnabled(False)
-        
+
         # find files
         fDir = QtCore.QDir()
         fDir.setPath(self.curPath)
@@ -1140,31 +1163,29 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
             # check data collection timestamp
             with open(self.currentFrame, 'rb') as ofile:
                 year = int(re.search(rb'(\d{4}):\d{2}:\d{2}\s+\d{2}:\d{2}:\d{2}', ofile.read(64)).group(1).decode())
-            SP8_tth_corr = 0.0
             if year < 2019:
-                SP8_tth_corr = 0.048
+                self.SP8_tth_corr = 0.048
             conversion = convert_frame_SP8_Bruker
             args = [path_output]
             # change wavelength
             source_w = None
             if self.action_set_wavelength.isChecked():
                 source_w = self.exp_wavelength
-            kwargs = {'tth_corr':SP8_tth_corr, 'rows':rows, 'cols':cols, 'offset':offset, 'overwrite':overwrite_flag, 'source_w':source_w}
+            kwargs = {'tth_corr':self.SP8_tth_corr, 'rows':rows, 'cols':cols, 'offset':offset, 'overwrite':overwrite_flag, 'source_w':source_w}
         elif self.fSite == 'SP8_gz':
             rows, cols, offset, dtype = self.fInfo
             # check data collection timestamp
             with gzip.open(self.currentFrame, 'rb') as ofile:
                 year = int(re.search(rb'(\d{4}):\d{2}:\d{2}\s+\d{2}:\d{2}:\d{2}', ofile.read(64)).group(1).decode())
-            SP8_tth_corr = 0.0
             if year < 2019:
-                SP8_tth_corr = 0.048
+                self.SP8_tth_corr = 0.048
             conversion = convert_frame_SP8_Bruker_gz
             args = [path_output]
             # change wavelength
             source_w = None
             if self.action_set_wavelength.isChecked():
                 source_w = self.exp_wavelength
-            kwargs = {'tth_corr':SP8_tth_corr, 'rows':rows, 'cols':cols, 'offset':offset, 'overwrite':overwrite_flag, 'source_w':source_w}
+            kwargs = {'tth_corr':self.SP8_tth_corr, 'rows':rows, 'cols':cols, 'offset':offset, 'overwrite':overwrite_flag, 'source_w':source_w}
         elif self.fSite == 'DLS':
             rows, cols, offset, dtype = self.fInfo
             conversion = convert_frame_DLS_Bruker
@@ -1184,6 +1205,7 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.pool = QtCore.QThreadPool()
         for fname in self.framesList:
             worker = self.__class__.Threading(conversion, fname, args, kwargs)
+            print(kwargs)
             worker.signals.finished.connect(self.conversion_process)
             self.pool.start(worker)
         
