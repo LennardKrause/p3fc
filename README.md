@@ -14,9 +14,9 @@ The data can then be integrated using Brukers SAINT+ Integration Engine V8.35A o
   - any frame size is now allowed
 
 ## Installation
-Install directly from the wheel (check releases)
+Install directly from the wheel (check releases, install latest)
 ```
-python3 -m pip install p3fc-1.0.1-py3-none-any.whl
+python3 -m pip install p3fc-?.?.?-py3-none-any.whl
 ```
 it is installed as a script, run ```p3fc``` from a terminal.
 
@@ -27,7 +27,8 @@ it is installed as a script, run ```p3fc``` from a terminal.
    - follows hierarchal order (small > large)
  
  ## Good to know:
- - use ```Options -> Set Wavelength``` to overwrite the .inf info
+ - use ```Options -> Set Wavelength``` to overwrite the .inf info (SPring-8 data)
+ - use ```Options -> Set 2-Theta correction``` to overwrite the .inf info (SPring-8 data)
  - the ```Mask``` menu offers some useful functions 
  - the initial rectangle & circle will always be on top
  - objects are allowed to be placed anywhere
