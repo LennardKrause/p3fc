@@ -6,7 +6,7 @@ def main():
     from p3fc.lib.classes import Main_GUI
 
     # create logger
-    logging.basicConfig(level=logging.DEBUG, style='{', format='{message:>20s} @ {funcName}()')
+    logging.basicConfig(level=logging.INFO, style='{', format='{message:>20s} @ {funcName}()')
     logging.debug(__name__)
 
     app = QtWidgets.QApplication(sys.argv)

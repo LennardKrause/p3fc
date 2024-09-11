@@ -1205,7 +1205,6 @@ class Main_GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.pool = QtCore.QThreadPool()
         for fname in self.framesList:
             worker = self.__class__.Threading(conversion, fname, args, kwargs)
-            print(kwargs)
             worker.signals.finished.connect(self.conversion_process)
             self.pool.start(worker)
         
